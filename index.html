@@ -118,7 +118,7 @@
     <div class="question-content">
       <div class="intro-heart"><svg aria-hidden="true"><use href="#heart-icon"/></svg></div>
       <p class="eyebrow">Có một điều anh muốn hỏi…</p>
-      <h1>pqt có <span>yêu</span> ntđ không??</h1>
+      <h1>Em có <span>yêu</span> Anh không??</h1>
       <div class="answers">
         <button id="yesButton" class="answer yes">Có</button>
         <span class="no-slot"><button id="noButton" class="answer no" aria-label="Không, nút này sẽ chạy trốn">Không</button></span>
@@ -145,11 +145,11 @@
   // Muốn dùng bản nhạc riêng, thay nguồn data URI bằng 'audio/ten-bai-hat.mp3'.
   const AUDIO_SOURCES={question:ASSETS.question,love:ASSETS.love,click:ASSETS.click,dodge:ASSETS.dodge,consider:ASSETS.consider||ASSETS.click,heartbeat:ASSETS.heartbeat};
   const $=id=>document.getElementById(id),rand=(a,b)=>a+Math.random()*(b-a),clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
-  // Chỉnh tốc độ tại đây: thời gian nút chạy (ms), tốc độ rơi (px/giây).
+  // Thời gian nút chạy (ms) và thời gian một lượt rơi (giây), theo index2.html.
   const MOTION = {
     noSlideMs: 800,
-    fallSpeedMin: 40,
-    fallSpeedMax: 160
+    fallDurationMin: 5.6,
+    fallDurationMax: 11
   };
   $('universe').style.setProperty('--universe-image',
     'linear-gradient(90deg, #080b1e 0%, transparent 5%, ' +
@@ -312,14 +312,27 @@ document.addEventListener('keydown', e => {
     $('universe').style.setProperty('--tile-width', (H * 3) + 'px');
     for(const c of [starCanvas,rainCanvas]){c.width=Math.round(W*DPR);c.height=Math.round(H*DPR)}
     starCtx.setTransform(DPR,0,0,DPR,0,0);ctx.setTransform(DPR,0,0,DPR,0,0);
-    for(const o of falling){o.x*=W/oldW;o.y*=H/oldH;o.x=clamp(o.x,o.sprite.w/2+8,Math.max(o.sprite.w/2+8,W-o.sprite.w/2-8))}
+    rainConfig=getRainConfig();
+    itemLanes=createLaneDistributor(rainConfig.itemLaneCount,rainConfig.itemJitter);
+    spriteCache.clear();
+    for(const o of falling){
+      o.sprite=makeSprite(o.type,o.value,o.size,o.color);
+      const progress=(o.y-o.startY)/(o.endY-o.startY);
+      o.startY=-180+o.size/2;o.endY=H+80+o.size/2;
+      o.y=o.startY+(o.endY-o.startY)*progress;o.v=(o.endY-o.startY)/o.duration;
+      const padding=rainConfig.isIphone14ProMaxLike?18:rainConfig.isMobile?14:20;
+      const displayWidth=o.type==='text'?o.sprite.w-40:o.type==='heart'?o.size:o.sprite.w-12;
+      const minX=Math.max(displayWidth/2+padding,W*.03);
+      const maxX=Math.min(W-displayWidth/2-padding,W*.97);
+      o.x=maxX<minX?W/2:clamp(o.x*W/oldW,minX,maxX);
+    }
     for(const f of fractures){f.x*=W/oldW;f.y*=H/oldH;}
     for(const p of shards){p.x*=W/oldW;p.y*=H/oldH;}
-    spriteCache.clear();if(stage==='love')for(const o of falling){o.sprite=makeSprite(o.type,o.value,o.size,o.color)}
     if(no.classList.contains('escaped')){const r=no.getBoundingClientRect();no.style.left=clamp(r.left,16,Math.max(16,W-r.width-16))+'px';no.style.top=clamp(r.top,16,Math.max(16,H-r.height-16))+'px'}
   }
   const phrases=['Anh yêu em','ntđ yêu pqt','Yêu pqt nhất trên đời','pqt có yêu tui hong','Anh','Yêu','Em','thương','20/3','200 days','LOVE','love','Anh đợi em cả đời còn được'];
-  const falling=[],photos=[],spriteCache=new Map();let spawnWait = rand(.04, .15);
+  const falling=[],photos=[],spriteCache=new Map();let spawnWait=0,textSpawnWait=0,seedItemWait=0,seedTextWait=0,
+    seedItemsLeft=0,seedTextsLeft=0,rainInitialized=false;
   function rounded(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath()}
 const textColors = [
   '#ff69ad', '#ff7bb7', '#ff90c3', '#ffa5cf',
@@ -371,51 +384,98 @@ if (type === 'text') {
   }
   // manifest.js hỗ trợ tên ảnh bất kỳ; dùng đường dẫn tương đối cho file:// và web.
   (async()=>{for(const url of (window.LOVE_PHOTOS||[]).slice(0,100))await addPhoto(url)})();
-  function rainLimit(){return W<600?150:150}
-function spawn(seed = false, forced = null) {
-  if (falling.length >= rainLimit() + 10) return;
+  // Cấu hình phân bố, kích thước và nhịp tạo vật thể lấy từ index2.html.
+  function shuffledLanes(count) {
+    const order=Array.from({length:count},(_,i)=>i);
+    for(let i=order.length-1;i>0;i--){
+      const j=Math.floor(rand(0,i+1));[order[i],order[j]]=[order[j],order[i]];
+    }
+    return order;
+  }
+  function createLaneDistributor(laneCount,jitterRatio) {
+    let order=shuffledLanes(laneCount),index=0;
+    return {
+      nextXPercent(){
+        if(index>=order.length){order=shuffledLanes(laneCount);index=0;}
+        const lane=order[index++],width=100/laneCount;
+        return (lane+.5)*width+rand(-width*jitterRatio,width*jitterRatio);
+      }
+    };
+  }
+  function getRainConfig() {
+    const isMobile=W<=768,isSmallMobile=W<=420;
+    const isIphone14ProMaxLike=W>=414&&W<=460&&H>=820&&H>W;
+    if(isIphone14ProMaxLike)return {
+      isMobile:true,isIphone14ProMaxLike:true,
+      itemLaneCount:15,itemJitter:.03,itemInterval:105,textInterval:112,
+      heartSizeMin:12,heartSizeMax:22,textSizeMin:11,textSizeMax:14,
+      photoSizeMin:28,photoSizeMax:46,initialItems:34,initialTexts:26
+    };
+    return {
+      isMobile,isIphone14ProMaxLike:false,
+      itemLaneCount:isMobile?(isSmallMobile?12:14):24,
+      itemJitter:isMobile?.035:.08,
+      itemInterval:isMobile?110:95,textInterval:isMobile?125:150,
+      heartSizeMin:isMobile?10:14,heartSizeMax:isMobile?20:30,
+      textSizeMin:isMobile?10:11,textSizeMax:isMobile?12:15,
+      photoSizeMin:isMobile?25:35,photoSizeMax:isMobile?40:60,
+      initialItems:isMobile?32:46,initialTexts:isMobile?22:32
+    };
+  }
+  let rainConfig=getRainConfig();
+  let itemLanes=createLaneDistributor(rainConfig.itemLaneCount,rainConfig.itemJitter);
+  function rainLimit(){
+    // Đủ chỗ cho cả đợt mở đầu và hai luồng rơi liên tục như file tham chiếu.
+    return Math.ceil((1000/rainConfig.itemInterval+1000/rainConfig.textInterval)
+      *MOTION.fallDurationMax/(reduced?.6:1))
+      +rainConfig.initialItems+rainConfig.initialTexts+12;
+  }
 
-  const roll = Math.random();
-  let type = forced || (photos.length
-    ? (roll < .70 ? 'text' : roll < .95 ? 'heart' : 'photo')
-    : (roll < .62 ? 'text' : 'heart'));
-  if (type === 'photo' && !photos.length) type = 'heart';
-
-  const size = type === 'text'
-    ? Math.round(rand(W < 600 ? 11 : 13, W < 600 ? 17 : 23))
-    : type === 'heart'
-      ? Math.round(rand(12, 31))
-      : Math.round(rand(W < 600 ? 24 : 30, W < 600 ? 42 : 56));
-
-  const value = type === 'text'
-    ? phrases[Math.floor(rand(0, phrases.length))]
-    : type === 'heart'
-      ? ['#ff83be', '#f8a4d3', '#f462ad'][Math.floor(rand(0, 3))]
-      : photos[Math.floor(rand(0, photos.length))];
-
-  const color = type === 'text'
-    ? textColors[Math.floor(rand(0, textColors.length))]
-    : undefined;
-  const sprite = makeSprite(type, value, size, color);
-  const half = sprite.w / 2 + 12;
-
-  falling.push({
-    type, value, size, color, sprite,
-    x: rand(half, Math.max(half, W - half)),
-    y: seed ? rand(-sprite.h, H - sprite.h) : -sprite.h,
-    v: rand(MOTION.fallSpeedMin, MOTION.fallSpeedMax) * (reduced ? .6 : 1),
-    phase: rand(0, Math.PI * 2),
-    sway: rand(.5, 1.1),
-    opacity: rand(.65, .98),
-    angle: 0
-  });
+function spawn(seed=false,forced=null,extraText=false) {
+  if(falling.length>=rainLimit())return;
+  const roll=Math.random();
+  let type=forced||(photos.length
+    ?(roll<.70?'text':roll<.95?'heart':'photo')
+    :(roll<.62?'text':'heart'));
+  if(type==='photo'&&!photos.length)type='heart';
+  const c=rainConfig;
+  const baseSize=type==='text'?rand(c.textSizeMin,c.textSizeMax)
+    :type==='heart'?rand(c.heartSizeMin,c.heartSizeMax)
+    :rand(c.photoSizeMin,c.photoSizeMax);
+  const scale=extraText?rand(.82,1.14):rand(.78,1.22);
+  const size=Math.max(1,Math.round(baseSize*scale));
+  const value=type==='text'?phrases[Math.floor(rand(0,phrases.length))]
+    :type==='heart'?['#ff83be','#f8a4d3','#f462ad'][Math.floor(rand(0,3))]
+    :photos[Math.floor(rand(0,photos.length))];
+  const color=type==='text'?textColors[Math.floor(rand(0,textColors.length))]:undefined;
+  const sprite=makeSprite(type,value,size,color);
+  const padding=c.isIphone14ProMaxLike?18:c.isMobile?14:20;
+  const displayWidth=type==='text'?sprite.w-40:type==='heart'?size:sprite.w-12;
+  const half=displayWidth/2+padding;
+  const minX=Math.max(half,W*.03),maxX=Math.min(W-half,W*.97);
+  const preferredX=itemLanes.nextXPercent()/100*W;
+  const x=maxX<minX?W/2:clamp(preferredX,minX,maxX);
+  // index2 bắt đầu ở -180px và kết thúc ở H+80px (tọa độ mép trên).
+  const duration=rand(MOTION.fallDurationMin,MOTION.fallDurationMax)/(reduced?.6:1);
+  const startY=-180+size/2,endY=H+80+size/2;
+  const o={
+    type,value,size,color,sprite,x,y:startY,startY,endY,duration,baseSize,scale,extraText,
+    v:(endY-startY)/duration,
+    phase:rand(0,Math.PI*2),sway:rand(.5,1.1),opacity:rand(.65,.98),angle:0
+  };
+  falling.push(o);return o;
 }
 function seedRain() {
-  falling.length = 0;
-  spawnWait = rand(.04, .15);
-  fractures.length = 0;shards.length = 0;
-  heartBreakBatches = 0;lastHeartBreakCount = 0;
-  heartBreakWait = rand(HEART_BREAKS.intervalMin, HEART_BREAKS.intervalMax);
+  if(!rainInitialized){
+    rainInitialized=true;falling.length=0;
+    spawnWait=rainConfig.itemInterval/1000;
+    textSpawnWait=rainConfig.textInterval/1000;
+    seedItemWait=0;seedTextWait=0;
+    seedItemsLeft=rainConfig.initialItems;seedTextsLeft=rainConfig.initialTexts;
+  }
+  fractures.length=0;shards.length=0;
+  heartBreakBatches=0;lastHeartBreakCount=0;
+  heartBreakWait=rand(HEART_BREAKS.intervalMin,HEART_BREAKS.intervalMax);
 }
   // Chọn những trái tim đang nhìn thấy, không tạo thêm vật thể để làm hiệu ứng.
   const HEART_BREAKS = {
@@ -610,31 +670,35 @@ function seedRain() {
     for(const s of stars){let x=((s.x*W+clock*(1.2+s.depth*1.7))%(W+24))-12,y=((s.y*H+Math.sin(clock*.06+s.phase)*12)%(H+24))-12;let z=5+s.depth*12;starCtx.globalAlpha=(.23+.2*Math.sin(clock*.55+s.phase))*(.5+s.depth*.5);starCtx.drawImage(starSprites[s.color],x-z/2,y-z/2,z,z)}
     starCtx.globalAlpha=1;
   }
-  function drawRain(dt) {
+  function advanceRain(dt) {
     rainTime+=dt;
-    ctx.clearRect(0,0,W,H);
-    spawnWait-=dt;
-    while(spawnWait<=0) {
-      if(falling.length<rainLimit()) spawn();
-      spawnWait+=W<600?rand(.025,.08):rand(.04,.12);
-    }
-    for(let i=falling.length-1;i>=0;i--) {
+    // Hai luồng liên tục: vật thể hỗn hợp và chữ bổ sung.
+    spawnWait-=dt;textSpawnWait-=dt;
+    while(spawnWait<=0){spawn();spawnWait+=rainConfig.itemInterval/1000;}
+    while(textSpawnWait<=0){spawn(false,'text',true);textSpawnWait+=rainConfig.textInterval/1000;}
+    // Rải đợt mở đầu theo nhịp 72ms / 95ms của index2, không dồn cùng một khung hình.
+    seedItemWait-=dt;seedTextWait-=dt;
+    while(seedItemsLeft>0&&seedItemWait<=0){spawn(true);seedItemsLeft--;seedItemWait+=.072;}
+    while(seedTextsLeft>0&&seedTextWait<=0){spawn(true,'text',true);seedTextsLeft--;seedTextWait+=.095;}
+    for(let i=falling.length-1;i>=0;i--){
       const o=falling[i];o.y+=o.v*dt;
       o.angle=o.type==='heart'?Math.sin(rainTime*o.sway+o.phase)*Math.PI/4:0;
       const extent=(Math.abs(Math.cos(o.angle))*o.sprite.h+
         Math.abs(Math.sin(o.angle))*o.sprite.w)/2;
-      if(o.y-extent>H+2) falling.splice(i,1);
+      if(o.y-extent>H+2)falling.splice(i,1);
     }
-    // Chuyển chính sprite trái tim thành các mảnh: không biến mất trước khi vỡ.
+  }
+  function drawRain(dt) {
+    advanceRain(dt);
+    ctx.clearRect(0,0,W,H);
     updateRandomHeartBreaks(dt);
-    for(const o of falling) {
+    for(const o of falling){
       ctx.save();ctx.globalAlpha=o.opacity;
       ctx.translate(o.x,o.y);ctx.rotate(o.angle);
       ctx.drawImage(o.sprite.canvas,-o.sprite.w/2,-o.sprite.h/2,o.sprite.w,o.sprite.h);
       ctx.restore();
     }
-    drawFractures(dt);
-    drawHeartShards(dt);
+    drawFractures(dt);drawHeartShards(dt);
   }
   // Draw every display refresh, including 120/144 Hz; do not cap at 60 fps.
   let raf=null,frameCount=0,frameWindowStart=performance.now(),observedFps=0;
@@ -647,11 +711,11 @@ function seedRain() {
       frameCount=0;frameWindowStart=now;
     }
     drawStars();
-    if(stage==='love') drawRain(dt);
+    if(stage==='love')drawRain(dt);else advanceRain(dt);
     raf=requestAnimationFrame(animate);
   }
 
-  resize();addEventListener('resize',resize);if(window.visualViewport)visualViewport.addEventListener('resize',resize);raf=requestAnimationFrame(animate);
+  resize();seedRain();addEventListener('resize',resize);if(window.visualViewport)visualViewport.addEventListener('resize',resize);raf=requestAnimationFrame(animate);
   document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(raf);Object.values(music).forEach(a=>a.pause())}else{last=performance.now();raf=requestAnimationFrame(animate);if(soundEnabled&&audioUnlocked)currentMusic().play().catch(()=>{})}});
   // Read-only diagnostics for local verification; no user data is sent anywhere.
   window.loveDiagnostics=()=>({stage,width:W,height:H,falling:falling.length,heartBreakWait,heartBreakBatches,lastHeartBreakCount,shards:shards.length,fractures:fractures.length,fragments:fractures.reduce((n,f)=>n+f.pieces.length,0),photos:photos.length,cache:spriteCache.size,backgroundTime:clock,observedFps,audioUnlocked,soundEnabled});
