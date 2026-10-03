@@ -377,7 +377,7 @@ function spawn(seed = false, forced = null) {
 
   const roll = Math.random();
   let type = forced || (photos.length
-    ? (roll < .40 ? 'text' : roll < .68 ? 'heart' : 'photo')
+    ? (roll < .53 ? 'text' : roll < .90 ? 'heart' : 'photo')
     : (roll < .62 ? 'text' : 'heart'));
   if (type === 'photo' && !photos.length) type = 'heart';
 
