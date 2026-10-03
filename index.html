@@ -371,13 +371,13 @@ if (type === 'text') {
   }
   // manifest.js hỗ trợ tên ảnh bất kỳ; dùng đường dẫn tương đối cho file:// và web.
   (async()=>{for(const url of (window.LOVE_PHOTOS||[]).slice(0,100))await addPhoto(url)})();
-  function rainLimit(){return W<600?90:150}
+  function rainLimit(){return W<600?150:150}
 function spawn(seed = false, forced = null) {
   if (falling.length >= rainLimit() + 10) return;
 
   const roll = Math.random();
   let type = forced || (photos.length
-    ? (roll < .60 ? 'text' : roll < .95 ? 'heart' : 'photo')
+    ? (roll < .70 ? 'text' : roll < .95 ? 'heart' : 'photo')
     : (roll < .62 ? 'text' : 'heart'));
   if (type === 'photo' && !photos.length) type = 'heart';
 
@@ -616,7 +616,7 @@ function seedRain() {
     spawnWait-=dt;
     while(spawnWait<=0) {
       if(falling.length<rainLimit()) spawn();
-      spawnWait+=W<600?rand(.5,.16):rand(.04,.12);
+      spawnWait+=W<600?rand(.025,.08):rand(.04,.12);
     }
     for(let i=falling.length-1;i>=0;i--) {
       const o=falling[i];o.y+=o.v*dt;
